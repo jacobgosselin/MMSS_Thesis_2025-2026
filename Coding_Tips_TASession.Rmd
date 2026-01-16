@@ -14,7 +14,6 @@ output:
       width: 1280
       height: 720
       navigationMode: linear
-    
 ---
 
 ```{r setup, include=FALSE}
@@ -48,17 +47,18 @@ write_csv(injury_ky, 'data/injury_ky.csv')
 
 ## Outline
 
-1. **Instrumental Variables (IV)**
-   - The DAG and Endogeneity Problem
-   - The Solution
-   - Estimation (2SLS)
-   - Example: Macro Question
+<div style="text-align: left;">
+First go through coding examples for two causal inference methods:
+</div>
 
+1. **Instrumental Variables (IV)**
 2. **Difference-in-Differences (DiD)**
-   - The DAG and Endogeneity Problem
-   - The Solution
-   - Estimation (TWFE)
-   - Examples: Static and Dynamic DiD
+
+<div style="text-align: left;">
+Then go through some..
+</div>
+
+3. **General Tips for Research and Writing**
 
 # Instrumental Variables
 
@@ -91,7 +91,7 @@ $$
 - Mechanically, this corresponds to: 
   1. Explain `X` with `Z`, and keep only what *is* explained, `X'`
   2. Explain `Y` with `Z`, and keep only what *is* explained, `Y'`
-  3. Get the correlation between `X'` and `Y'`
+  <!-- 3. Get the correlation between `X'` and `Y'` -->
 
 ## IV: The Solution (visualized)
 
@@ -147,7 +147,7 @@ p <- ggplot(dffull,aes(y=Y,x=X,color=as.factor(Z)))+geom_point(width=2)+
         axis.title = element_text(size = 24),
         plot.margin = margin(t = 20, r = 10, b = 10, l = 10))
 
-# animate(p, nframes = 175, renderer = gifski_renderer(), device = "png", width = 16, height = 9, units = "in", res = 150)
+animate(p, nframes = 175, renderer = gifski_renderer(), device = "png", width = 16, height = 9, units = "in", res = 150)
 ```
 
 ## IV: Estimation (2SLS)
@@ -328,7 +328,7 @@ p <- ggplot(dffull,aes(y=Y,x=xaxisTime,color=as.factor(Control)))+geom_point(wid
   ease_aes('sine-in-out')+
   exit_fade()+enter_fade()
 
-# animate(p, nframes = 150, renderer = gifski_renderer(), device = "png", width = 16, height = 9, units = "in", res = 150)
+animate(p, nframes = 150, renderer = gifski_renderer(), device = "png", width = 16, height = 9, units = "in", res = 150)
 ```
 
 ## DiD: Estimation (TWFE)
