@@ -1,0 +1,425 @@
+---
+title: "Coding (and Research) Tips"
+author: "Jacob Toner Gosselin"
+date: "`r Sys.Date()`"
+output:   
+  revealjs::revealjs_presentation:
+    theme: white
+    transition: slide
+    self_contained: true
+    smart: true
+    fig_caption: true
+    reveal_options:
+      slideNumber: true
+      width: 1280
+      height: 720
+      navigationMode: linear
+    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message=FALSE)
+library(tidyverse)
+library(ggfixest)
+library(wooldridge)
+library(dagitty)
+library(ggdag)
+library(gganimate)
+library(ggthemes)
+library(Cairo)
+library(gifski)
+library(modelsummary)
+library(AER)
+theme_set(theme_gray(base_size = 15))
+
+# Export datasets for Stata replication
+# IV Example: US Consumption data
+data(USConsump1993)
+USC93 <- as.data.frame(USConsump1993) 
+write_csv(USC93, 'data/usconsump1993.csv')
+
+# DiD Example 1: Injury data
+data(injury, package = 'wooldridge')
+injury_ky <- injury %>%
+  filter(ky == 1) %>%
+  mutate(Treated = afchnge * highearn)
+write_csv(injury_ky, 'data/injury_ky.csv')
+```
+
+## Outline
+
+1. **Instrumental Variables (IV)**
+   - The DAG and Endogeneity Problem
+   - The Solution
+   - Estimation (2SLS)
+   - Example: Macro Question
+
+2. **Difference-in-Differences (DiD)**
+   - The DAG and Endogeneity Problem
+   - The Solution
+   - Estimation (TWFE)
+   - Examples: Static and Dynamic DiD
+
+# Instrumental Variables
+
+## IV: The DAG and Endogeneity Problem
+
+- Consider an RCT. Random assignment `R` that determines `X`. So even though we have back doors between `X` and `Y`, we can identify `X -> Y`
+- Idea of IV: can we find variable `Z` that takes the place of `R`?
+
+```{r, dev='CairoPNG', echo=FALSE, fig.width=6,fig.height=3}
+dag <- dagify(Y~X+W,
+              X~W,
+              X~R,
+              coords=list(
+                x=c(X=1,Y=2,W=1.5,R=0),
+                y=c(X=1,Y=1,W=2,R=1)
+              )) %>% tidy_dagitty()
+ggdag_classic(dag,node_size=25) + 
+  theme_dag_blank()
+```
+
+## IV: The Solution
+- Consider standard linear model:
+$$
+Y = \beta X + \varepsilon
+$$
+- Assume (1) $E[X|Z] \neq 0$ and (2) $E[\varepsilon|Z] = 0$ 
+$$
+E[Y|Z] = \beta E[X|Z] + E[\varepsilon|Z] 
+$$
+- Mechanically, this corresponds to: 
+  1. Explain `X` with `Z`, and keep only what *is* explained, `X'`
+  2. Explain `Y` with `Z`, and keep only what *is* explained, `Y'`
+  3. Get the correlation between `X'` and `Y'`
+
+## IV: The Solution (visualized)
+
+```{r, dev='CairoPNG', echo=FALSE, fig.width=16,fig.height=9, out.width="70%"}
+df <- data.frame(Z = as.integer(1:200>100),
+                 W = rnorm(200)) %>%
+  mutate(X = .5+2*W +2*Z+ rnorm(200)) %>%
+  mutate(Y = -X + 4*W + 1 + rnorm(200),time="1") %>%
+  group_by(Z) %>%
+  mutate(mean_X=mean(X),mean_Y=mean(Y),YL=NA,XL=NA) %>%
+  ungroup()
+
+#Calculate correlations
+before_cor <- paste("1. Raw data. Correlation between X and Y: ",round(cor(df$X,df$Y),3),sep='')
+afterlab <- '6. The slope between points is the effect of X on Y.'
+
+dffull <- rbind(
+  #Step 1: Raw data only
+  df %>% mutate(mean_X=NA,mean_Y=NA,time=before_cor),
+  #Step 2: Add x-lines
+  df %>% mutate(mean_Y=NA,time='2. What differences in X are explained by Z?'),
+  #Step 3: X de-meaned 
+  df %>% mutate(X = mean_X,mean_Y=NA,time="3. Remove everything in X not explained by Z"),
+  #Step 4: Remove X lines, add Y
+  df %>% mutate(X = mean_X,mean_X=NA,time="4. What differences in Y are explained by Z?"),
+  #Step 5: Y de-meaned
+  df %>% mutate(X = mean_X,Y = mean_Y,mean_X=NA,time="5. Remove everything in Y not explained by Z"),
+  #Step 6: Raw demeaned data only
+  df %>% mutate(X =  mean_X,Y =mean_Y,mean_X=NA,mean_Y=NA,YL=mean_Y,XL=mean_X,time=afterlab))
+
+#Get line segments
+endpts <- df %>%
+  group_by(Z) %>%
+  summarize(mean_X=mean(mean_X),mean_Y=mean(mean_Y))
+
+p <- ggplot(dffull,aes(y=Y,x=X,color=as.factor(Z)))+geom_point(width=2)+
+  theme_minimal() +
+  geom_vline(aes(xintercept=mean_X,color=as.factor(Z)))+
+  geom_hline(aes(yintercept=mean_Y,color=as.factor(Z)))+
+  guides(color=guide_legend(title="Z"))+
+  geom_segment(aes(x=ifelse(time==afterlab,endpts$mean_X[1],NA),
+                   y=endpts$mean_Y[1],xend=endpts$mean_X[2],
+                   yend=endpts$mean_Y[2]),size=1,color='blue')+
+  scale_color_colorblind()+
+  labs(title = '')+
+  transition_states(time,transition_length=c(6,16,6,16,6,6),state_length=c(50,22,12,22,12,50),wrap=FALSE)+
+  ease_aes('sine-in-out')+
+  exit_fade()+enter_fade() +
+  theme(plot.title = element_text(size = 24, margin = margin(b = 10)),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 24),
+        axis.text = element_text(size = 24),
+        axis.title = element_text(size = 24),
+        plot.margin = margin(t = 20, r = 10, b = 10, l = 10))
+
+# animate(p, nframes = 175, renderer = gifski_renderer(), device = "png", width = 16, height = 9, units = "in", res = 150)
+```
+
+## IV: Estimation (2SLS)
+
+Most commonly this is estimated using *two stage least squares*
+
+1. Use the instruments and controls to explain $X$ in the first stage
+2. Use the controls and the predicted (explained) part of $X$ in place of $X$ in the second stage
+3. (do some standard error adjustments)
+
+Many ways to do this in R, I'll be doing 2SLS with `feols()` from **fixest**
+
+## Example 1: Macro Question!
+
+- How does US income affect US expenditures ("marginal propensity to consume")? 
+- We can instrument with investment from LAST year.
+```{r, echo = TRUE}
+library(AER)
+#US income and consumption data 1950-1993
+data(USConsump1993)
+USC93 <- as.data.frame(USConsump1993)
+#lag() gets the observation above; here the observation above is last year
+IV <- USC93 %>% mutate(lastyr.invest = lag(income) - lag(expenditure)) 
+# 2SLS estimation
+m_iv <- feols(expenditure ~ 1 | income ~ lastyr.invest, data = IV, se = 'hetero')
+```
+
+## Example 1: Macro Question!
+```{r, echo = FALSE}
+msummary(list('Income (First Stage)' = m_iv$iv_first_stage[[1]],
+              'Expenditure' = m_iv), coef_map = c('fit_income' = 'Expenditure',
+                      'lastyr.invest' = 'Lagged Investment'),
+         gof_omit = 'RMSE|AIC|BIC|R2|F|Lik', stars = TRUE)
+```
+
+## Example 1: Stata Replication
+```{stata, eval = FALSE, echo = TRUE}
+* Load the data
+import delimited "data/usconsump1993.csv", clear
+* generate lagged investment variable and time variable 
+gen year = _n + 1949
+tsset year
+gen lastyr_invest = L.income - L.expenditure
+* 2SLS estimation: instrument income with lagged investment
+ivregress 2sls expenditure (income = lastyr_invest), vce(robust)
+```
+
+# Difference-in-Differences
+
+## DiD: The DAG and Endogeneity Problem
+
+- We compare the time before the policy to the time after
+- But if anything else is changing over time, we have a problem
+- Need a **control** group that is not treated
+```{r, dev='CairoPNG', echo=FALSE, fig.width=16,fig.height=4.5}
+dag1 <- dagify(Y~D+Time,
+              D~Time,
+              coords=list(
+                x=c(D=1,Y=3,Time=2),
+                y=c(D=1,Y=1,Time=2)
+              )) %>% tidy_dagitty()
+p1 <- ggdag_classic(dag1,node_size=25) +
+  theme_dag_blank()
+
+dag2 <- dagify(Y~D+Time+Group,
+              D~Time+Group,
+              coords=list(
+                x=c(D=1,Y=3,Time=3,Group=1),
+                y=c(D=2,Y=1,Time=2,Group=1)
+              )) %>% tidy_dagitty()
+p2 <- ggdag_classic(dag2,node_size=25) +
+  theme_dag_blank()
+
+gridExtra::grid.arrange(p1, p2, ncol=2)
+```
+
+## DiD: The Solution
+
+- Before-After Difference for Untreated: 
+$$
+E[Y | U, A] - E[Y | U, B] = Time
+$$
+- Before-After Difference for Treated: 
+$$
+E[Y | T, A] - E[Y | T, B] = Time + Trmt
+$$
+- Difference-in-Differences:
+$$
+(E[Y | T, A] - E[Y | T, B]) - (E[Y | U, A] - E[Y | U, B]) = Trmt
+$$
+
+## DiD: The Solution (visualized)
+
+```{r, dev='CairoPNG', echo=FALSE, fig.width=16, fig.height=9, out.width="70%"}
+df <- data.frame(Control = c(rep("Control",150),rep("Treatment",150)),
+                 Time=rep(c(rep("Before",75),rep("After",75)),2)) %>%
+  mutate(Y = 2+2*(Control=="Treatment")+1*(Time=="After") + 1.5*(Control=="Treatment")*(Time=="After")+rnorm(300),state="1",
+         xaxisTime = (Time == "Before") + 2*(Time == "After") + (runif(300)-.5)*.95) %>%
+  group_by(Control,Time) %>%
+  mutate(mean_Y=mean(Y)) %>%
+  ungroup()
+
+df$Time <- factor(df$Time,levels=c("Before","After"))
+
+#Create segments
+dfseg <- df %>%
+  group_by(Control,Time) %>%
+  summarize(mean_Y = mean(mean_Y)) %>%
+  ungroup()
+
+diff <- filter(dfseg,Time=='After',Control=='Control')$mean_Y[1] - filter(dfseg,Time=='Before',Control=='Control')$mean_Y[1]
+
+dffull <- rbind(
+  #Step 1: Raw data only
+  df %>% mutate(state='1. Start with raw data.'),
+  #Step 2: Add Y-lines
+  df %>% mutate(state='2a. Take means by group and time.'),
+  #Step 3: Collapse to means
+  df %>% mutate(Y = mean_Y,state="2b. Take means by group and time."),
+  #Step 4: Display time effect
+  df %>% mutate(Y = mean_Y,state="3. Change in control group means shows time effect."),
+  #Step 5: Shift to remove time effect
+  df %>% mutate(Y = mean_Y 
+                - (Time=='After')*diff,
+                state="4. Subtract time effect from both groups."),
+  #Step 6: Raw demeaned data only
+  df %>% mutate(Y = mean_Y 
+                - (Time=='After')*diff,
+                state='5. Remaining difference in treated group is treatment effect.'))
+
+
+
+p <- ggplot(dffull,aes(y=Y,x=xaxisTime,color=as.factor(Control)))+geom_point(width=2)+
+  guides(color=guide_legend(title="Group"))+
+  theme_minimal() +
+  geom_vline(aes(xintercept=1.5),linetype='dashed')+
+  scale_color_colorblind()+
+  scale_x_continuous(
+    breaks = c(1, 2),
+    label = c("Before Treatment", "After Treatment")
+  )+xlab("Time")+
+  #The four lines for the four means
+  geom_segment(aes(x=ifelse(state %in% c('2a. Take means by group and time.',"2b. Take means by group and time."),
+                            .5,NA),
+                   xend=1.5,y=filter(dfseg,Time=='Before',Control=='Control')$mean_Y[1],
+                   yend=filter(dfseg,Time=='Before',Control=='Control')$mean_Y[1]),size=1,color='black')+
+  geom_segment(aes(x=ifelse(state %in% c('2a. Take means by group and time.',"2b. Take means by group and time."),
+                            .5,NA),
+                   xend=1.5,y=filter(dfseg,Time=='Before',Control=='Treatment')$mean_Y[1],
+                   yend=filter(dfseg,Time=='Before',Control=='Treatment')$mean_Y[1]),size=1,color="#E69F00")+
+  geom_segment(aes(x=ifelse(state %in% c('2a. Take means by group and time.',"2b. Take means by group and time."),
+                            1.5,NA),
+                   xend=2.5,y=filter(dfseg,Time=='After',Control=='Control')$mean_Y[1],
+                   yend=filter(dfseg,Time=='After',Control=='Control')$mean_Y[1]),size=1,color='black')+
+  geom_segment(aes(x=ifelse(state %in% c('2a. Take means by group and time.',"2b. Take means by group and time."),
+                            1.5,NA),
+                   xend=2.5,y=filter(dfseg,Time=='After',Control=='Treatment')$mean_Y[1],
+                   yend=filter(dfseg,Time=='After',Control=='Treatment')$mean_Y[1]),size=1,color="#E69F00")+
+  #Line indicating treatment effect
+  geom_segment(aes(x=1.5,xend=1.5,
+                   y=ifelse(state=='5. Remaining difference in treated group is treatment effect.',
+                            filter(dfseg,Time=='After',Control=='Treatment')$mean_Y[1]-diff,NA),
+                   yend=filter(dfseg,Time=='Before',Control=='Treatment')$mean_Y[1]),size=1.5,color='blue')+
+  #Line indicating pre/post control difference
+  geom_segment(aes(x=1.5,xend=1.5,
+                   y=ifelse(state=="3. Change in control group means shows time effect.",
+                            filter(dfseg,Time=='After',Control=='Control')$mean_Y[1],
+                            ifelse(state=="4. Subtract time effect from both groups.",
+                                   filter(dfseg,Time=='Before',Control=='Control')$mean_Y[1],NA)),
+                   yend=filter(dfseg,Time=='Before',Control=='Control')$mean_Y[1]),size=1.5,color='blue')+
+  labs(title = '')+
+  theme(plot.title = element_text(size = 24),
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 24),
+        axis.text = element_text(size = 24),
+        axis.title = element_text(size = 24))+
+  transition_states(state,transition_length=c(6,16,6,16,6,6),state_length=c(50,22,12,22,12,50),wrap=FALSE)+
+  ease_aes('sine-in-out')+
+  exit_fade()+enter_fade()
+
+# animate(p, nframes = 150, renderer = gifski_renderer(), device = "png", width = 16, height = 9, units = "in", res = 150)
+```
+
+## DiD: Estimation (TWFE)
+- Standard DiD estimation is **two-way fixed effects** (TWFE) regression
+$$ Y = \gamma_i + \gamma_t + \beta Treated + \varepsilon $$
+- Why this works is easy to see if we limit it to a "2x2" DID 
+$$ Y = \gamma_i TreatedGroup + \gamma_t After + \beta TreatedGroup\times After + \varepsilon $$
+- $\gamma_i$ is prior-period group diff, $\gamma_t$ is shared time effect, and $\beta$ is how much bigger the $TreatedGroup$ effect gets after treatment vs. before, i.e. how much the gap grows (Difference-in-Differences!)
+
+## Example 1
+
+- As a quick example we'll use `data(injury)` from `library(wooldridge)`
+- This is from Meyer, Viscusi, and Durbin (1995) - In Kentucky in 1980, worker's compensation law changed to increase benefits, but only for high-earning individuals
+- What effect did this have on how long you stay out of work?
+- The treated group is individuals who were already high-earning, and the control group is those who weren't
+
+## Example 1
+
+```{r, echo = TRUE}
+data(injury, package = 'wooldridge')
+injury <- injury %>%
+  filter(ky == 1)  %>% # Kentucky only
+  mutate(Treated = afchnge*highearn)
+m1_did <- feols(ldurat ~ Treated | highearn + afchnge, data = injury)
+msummary(m1_did, stars = TRUE, gof_omit = 'FE|RMSE|R2|AIC|BIC|Lik|Adj|Pseudo')
+```
+
+## Example 1: Stata Replication
+```{stata, eval = FALSE, echo = TRUE}
+* Load the data
+import delimited "data/injury_ky.csv", clear
+* TWFE DiD regression with fixed effects for group (highearn) and time (afchnge)
+reghdfe ldurat treated, absorb(highearn afchnge) vce(robust)
+```
+
+## Example 2: Dynamic DiD
+- Often estimate a *dynamic effect* where we allow effect to be different at different lengths since the treatment
+- Simply interact $TreatedGroup$ with binary indicators for time period (last period before treatment is the reference)
+$$ Y = \gamma_i + \gamma_t + \beta_t TreatedGroup + \varepsilon $$
+- Typically plot the $\beta_t$ coefficients to see how effect evolves over time
+  
+## Example 2: Dynamic DiD
+```{r, echo = TRUE, fig.width=16, fig.height=9, out.width="70%"}
+library(dplyr)
+library(fixest)
+library(ggplot2)
+library(readr)
+df <- read_csv('data/eitc.csv') %>%
+  mutate(treated = 1*(children > 0)) %>%
+  mutate(year = factor(year))
+# assert that '1993' is a level of year
+stopifnot('1993' %in% levels(df$year))
+m <- feols(work ~ i(year, treated, ref = '1993') | treated + year, data = df)
+coef_plot <- ggcoefplot(m, ref = c('1993' = 3), pt.join = TRUE) +
+  labs(title = "Dynamic Difference-in-Differences Estimates of EITC on Work",
+       x = "Year",
+       y = "Coefficient Estimate (ref: 1993)") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 24),
+        axis.text = element_text(size = 18),
+        axis.title = element_text(size = 18))
+```
+
+## Example 2: Dynamic DiD
+```{r, echo = FALSE, dev='CairoPNG', fig.width=16, fig.height=9, out.width="70%"}
+coef_plot
+```
+
+# General Tips
+
+## During Research 
+
+## During Writing
+- Export tables and figures directly from code. No screenshots!
+- Include examples using texreg (R) or estout (Stata) 
+```{r, eval=TRUE, echo=FALSE}
+library(texreg)
+# first m_iv
+texreg(list(m_iv), file = "tables/iv_results.tex", table = FALSE,
+        caption = "IV Regression Results: US Consumption Data",
+        label = "tab:iv_results",
+        stars = c(0.01, 0.05, 0.1),
+        custom.coef.map = list('fit_income' = 'Expenditure',
+                            'lastyr.invest' = 'Lagged Investment'),
+        include.nobs = TRUE, include.rsquared = FALSE, include.adjrs = FALSE, include.fstatistic = FALSE)
+# second m1_did
+texreg(list(m1_did), file = "tables/did_results.tex", table = FALSE,
+        caption = "DiD Regression Results: Injury Data",
+        label = "tab:did_results",
+        stars = c(0.01, 0.05, 0.1), 
+        custom.coef.map = list('ldurat' = 'Length of Disability',
+                            'Treated' = 'Treated'), 
+        include.nobs = TRUE, include.rsquared = FALSE, include.adjrs = FALSE, include.fstatistic = FALSE)
+```
