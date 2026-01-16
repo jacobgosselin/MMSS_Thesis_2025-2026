@@ -9,8 +9,7 @@ cd "/Users/jacobgosselin/Documents(local)/GitHub/CausalitySlides"
 
 * Load the data
 import delimited "data/usconsump1993.csv", clear
-* generate lagged investment variable
-* and time variable which is row number + 1949
+* generate lagged investment variable and time variable 
 gen year = _n + 1949
 tsset year
 gen lastyr_invest = L.income - L.expenditure
