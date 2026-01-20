@@ -64,7 +64,7 @@ Then go through some..
 
 ## IV: The DAG and Endogeneity Problem
 
-- Consider an RCT. Random assignment `R` that determines `X`. So even though we have back doors between `X` and `Y`, we can identify `X -> Y`
+- Consider an RCT. Random assignment `R` that determines treatment `X`. So even if we have endogeneity via `W`, we can identify `X -> Y` 
 - Idea of IV: can we find variable `Z` that takes the place of `R`?
 
 ```{r, dev='CairoPNG', echo=FALSE, fig.width=6,fig.height=3}
@@ -127,14 +127,14 @@ endpts <- df %>%
   group_by(Z) %>%
   summarize(mean_X=mean(mean_X),mean_Y=mean(mean_Y))
 
-p <- ggplot(dffull,aes(y=Y,x=X,color=as.factor(Z)))+geom_point(width=2)+
+p <- ggplot(dffull,aes(y=Y,x=X,color=as.factor(Z)))+geom_point(size=3)+
   theme_minimal() +
-  geom_vline(aes(xintercept=mean_X,color=as.factor(Z)))+
-  geom_hline(aes(yintercept=mean_Y,color=as.factor(Z)))+
+  geom_vline(aes(xintercept=mean_X,color=as.factor(Z)), size = 2)+
+  geom_hline(aes(yintercept=mean_Y,color=as.factor(Z)), size = 2)+
   guides(color=guide_legend(title="Z"))+
   geom_segment(aes(x=ifelse(time==afterlab,endpts$mean_X[1],NA),
                    y=endpts$mean_Y[1],xend=endpts$mean_X[2],
-                   yend=endpts$mean_Y[2]),size=1,color='blue')+
+                   yend=endpts$mean_Y[2]),size=2,color='blue')+
   scale_color_colorblind()+
   labs(title = '')+
   transition_states(time,transition_length=c(6,16,6,16,6,6),state_length=c(50,22,12,22,12,50),wrap=FALSE)+
@@ -178,7 +178,7 @@ m_iv <- feols(expenditure ~ 1 | income ~ lastyr.invest, data = IV, se = 'hetero'
 ## Example 1: Macro Question!
 ```{r, echo = FALSE}
 msummary(list('Income (First Stage)' = m_iv$iv_first_stage[[1]],
-              'Expenditure' = m_iv), coef_map = c('fit_income' = 'Expenditure',
+              'Expenditure' = m_iv), coef_map = c('fit_income' = 'Income (2SLS)',
                       'lastyr.invest' = 'Lagged Investment'),
          gof_omit = 'RMSE|AIC|BIC|R2|F|Lik', stars = TRUE)
 ```
@@ -199,7 +199,7 @@ ivregress 2sls expenditure (income = lastyr_invest), vce(robust)
 
 ## DiD: The DAG and Endogeneity Problem
 
-- We compare the time before the policy to the time after
+- We compare the time before the treatment to the time after
 - But if anything else is changing over time, we have a problem
 - Need a **control** group that is not treated
 ```{r, dev='CairoPNG', echo=FALSE, fig.width=16,fig.height=4.5}
@@ -226,17 +226,17 @@ gridExtra::grid.arrange(p1, p2, ncol=2)
 
 ## DiD: The Solution
 
-- Before-After Difference for Untreated: 
+- Before-After Difference for Control Group: 
 $$
-E[Y | U, A] - E[Y | U, B] = Time
+E[Y | C, A] - E[Y | C, B] = Time
 $$
-- Before-After Difference for Treated: 
+- Before-After Difference for Trmt Group: 
 $$
 E[Y | T, A] - E[Y | T, B] = Time + Trmt
 $$
 - Difference-in-Differences:
 $$
-(E[Y | T, A] - E[Y | T, B]) - (E[Y | U, A] - E[Y | U, B]) = Trmt
+(E[Y | T, A] - E[Y | T, B]) - (E[Y | C, A] - E[Y | C, B]) = Trmt
 $$
 
 ## DiD: The Solution (visualized)
@@ -280,7 +280,7 @@ dffull <- rbind(
 
 
 
-p <- ggplot(dffull,aes(y=Y,x=xaxisTime,color=as.factor(Control)))+geom_point(width=2)+
+p <- ggplot(dffull,aes(y=Y,x=xaxisTime,color=as.factor(Control)))+geom_point(size=3)+
   guides(color=guide_legend(title="Group"))+
   theme_minimal() +
   geom_vline(aes(xintercept=1.5),linetype='dashed')+
@@ -293,31 +293,31 @@ p <- ggplot(dffull,aes(y=Y,x=xaxisTime,color=as.factor(Control)))+geom_point(wid
   geom_segment(aes(x=ifelse(state %in% c('2a. Take means by group and time.',"2b. Take means by group and time."),
                             .5,NA),
                    xend=1.5,y=filter(dfseg,Time=='Before',Control=='Control')$mean_Y[1],
-                   yend=filter(dfseg,Time=='Before',Control=='Control')$mean_Y[1]),size=1,color='black')+
+                   yend=filter(dfseg,Time=='Before',Control=='Control')$mean_Y[1]),size=2,color='black')+
   geom_segment(aes(x=ifelse(state %in% c('2a. Take means by group and time.',"2b. Take means by group and time."),
                             .5,NA),
                    xend=1.5,y=filter(dfseg,Time=='Before',Control=='Treatment')$mean_Y[1],
-                   yend=filter(dfseg,Time=='Before',Control=='Treatment')$mean_Y[1]),size=1,color="#E69F00")+
+                   yend=filter(dfseg,Time=='Before',Control=='Treatment')$mean_Y[1]),size=2,color="#E69F00")+
   geom_segment(aes(x=ifelse(state %in% c('2a. Take means by group and time.',"2b. Take means by group and time."),
                             1.5,NA),
                    xend=2.5,y=filter(dfseg,Time=='After',Control=='Control')$mean_Y[1],
-                   yend=filter(dfseg,Time=='After',Control=='Control')$mean_Y[1]),size=1,color='black')+
+                   yend=filter(dfseg,Time=='After',Control=='Control')$mean_Y[1]),size=2,color='black')+
   geom_segment(aes(x=ifelse(state %in% c('2a. Take means by group and time.',"2b. Take means by group and time."),
                             1.5,NA),
                    xend=2.5,y=filter(dfseg,Time=='After',Control=='Treatment')$mean_Y[1],
-                   yend=filter(dfseg,Time=='After',Control=='Treatment')$mean_Y[1]),size=1,color="#E69F00")+
+                   yend=filter(dfseg,Time=='After',Control=='Treatment')$mean_Y[1]),size=2,color="#E69F00")+
   #Line indicating treatment effect
   geom_segment(aes(x=1.5,xend=1.5,
                    y=ifelse(state=='5. Remaining difference in treated group is treatment effect.',
                             filter(dfseg,Time=='After',Control=='Treatment')$mean_Y[1]-diff,NA),
-                   yend=filter(dfseg,Time=='Before',Control=='Treatment')$mean_Y[1]),size=1.5,color='blue')+
+                   yend=filter(dfseg,Time=='Before',Control=='Treatment')$mean_Y[1]),size=2,color='blue')+
   #Line indicating pre/post control difference
   geom_segment(aes(x=1.5,xend=1.5,
                    y=ifelse(state=="3. Change in control group means shows time effect.",
                             filter(dfseg,Time=='After',Control=='Control')$mean_Y[1],
                             ifelse(state=="4. Subtract time effect from both groups.",
                                    filter(dfseg,Time=='Before',Control=='Control')$mean_Y[1],NA)),
-                   yend=filter(dfseg,Time=='Before',Control=='Control')$mean_Y[1]),size=1.5,color='blue')+
+                   yend=filter(dfseg,Time=='Before',Control=='Control')$mean_Y[1]),size=2,color='blue')+
   labs(title = '')+
   theme(plot.title = element_text(size = 24),
         legend.text = element_text(size = 24),
@@ -335,7 +335,7 @@ animate(p, nframes = 150, renderer = gifski_renderer(), device = "png", width = 
 - Standard DiD estimation is **two-way fixed effects** (TWFE) regression
 $$ Y = \gamma_i + \gamma_t + \beta Treated + \varepsilon $$
 - Why this works is easy to see if we limit it to a "2x2" DID 
-$$ Y = \gamma_i TreatedGroup + \gamma_t After + \beta TreatedGroup\times After + \varepsilon $$
+$$ Y = \gamma_i TrmtGroup + \gamma_t After + \beta TrmtGroup\times After + \varepsilon $$
 - $\gamma_i$ is prior-period group diff, $\gamma_t$ is shared time effect, and $\beta$ is how much bigger the $TreatedGroup$ effect gets after treatment vs. before, i.e. how much the gap grows (Difference-in-Differences!)
 
 ## Example 1
@@ -400,10 +400,19 @@ coef_plot
 # General Tips
 
 ## During Research 
+- Organize your data, code, and results **as you go** 
+- Keep things replicable **as you go**
+- **KNOW WHAT YOU'RE DOING** 
+  - Know the difference between know, Know, and KNOW. KNOW everything in your paper.
+  - Don't over-rely on commands; use a few you understand well, and build from there (e.g. `feols()` in R)
+  - LLMs are great when you KNOW what you're doing. 
 
 ## During Writing
 - Export tables and figures directly from code. No screenshots!
-- Include examples using texreg (R) or estout (Stata) 
+  - Code include examples using texreg (R) or estout (Stata) 
+- Can be less work, and easier to keep replicable, to use LaTex 
+- Writing is **hard**. Start early, revise a lot, get feedback.
+- Clear, simple, concise is better. Good papers say one or two things, clearly and thoroughly.
 ```{r, eval=TRUE, echo=FALSE}
 library(texreg)
 # first m_iv
